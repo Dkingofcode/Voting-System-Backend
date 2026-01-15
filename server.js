@@ -1,50 +1,48 @@
-const express = require('express');
-const dotenv = require('dotenv');
-const { ethers } = require('ethers');
+require('dotenv').config();
+const app = require('./src/app');
+const connectDB = require('./src/config/database');
+const { connectRedis } = require('./src/config/redis');
+const logger = require('./src/utils/logger');
+const blockchainService = require('./src/services/blockchain.service');
 
-dotenv.config();
+const PORT = process.env.PORT || 5000;
 
-const app = express();
-app.use(express.json());
+// Connect to Database
+connectDB();
 
-const port = process.env.PORT || 3000;
+// Connect to Redis
+connectRedis();
 
-// Initialize Ethers.js
-const provider = new ethers.providers.InfuraProvider('homestead', process.env.INFURA_PROJECT_ID);
-const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-const contractAddress = process.env.CONTRACT_ADDRESS;
-
-// Define your contract ABI (Application Binary Interface)
-const contractABI = [
-    // Add your contract's ABI here
-];
-
-const contract = new ethers.Contract(contractAddress, contractABI, wallet);
-
-// API endpoint to get proposals
-app.get('/proposals', async (req, res) => {
-    try {
-        const proposals = await contract.getProposals();
-        res.json(proposals);
-    } catch (error) {
-        console.error(error);
-        res.status(500).send('Error fetching proposals');
-    }
+// Initialize Blockchain Connection
+blockchainService.initialize().catch(err => {
+  logger.error('Failed to initialize blockchain:', err);
 });
 
-// API endpoint to vote
-app.post('/vote', async (req, res) => {
-    const { proposalId } = req.body;
-    try {
-        const tx = await contract.vote(proposalId);
-        await tx.wait();
-        res.send('Vote cast successfully');
-    } catch (error) {
-        console.error(error);
-        res.status(500).send('Error casting vote');
-    }
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  logger.error('UNCAUGHT EXCEPTION! Shutting down...', err);
+  process.exit(1);
 });
 
-app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+const server = app.listen(PORT, () => {
+  logger.info(`🚀 Voting System running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+  logger.info(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
 });
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+  logger.error('UNHANDLED REJECTION! Shutting down...', err);
+  server.close(() => {
+    process.exit(1);
+  });
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM RECEIVED. Shutting down gracefully');
+  server.close(() => {
+    logger.info('Process terminated!');
+  });
+});
+
+module.exports = server;
